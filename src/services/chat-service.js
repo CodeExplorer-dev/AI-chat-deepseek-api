@@ -109,21 +109,21 @@ class ChatService {
    */
   async chat(sessionId, userMessage) {
     // 检查会话是否存在
-    const session = this.getSession(sessionId)
+    const session = await this.getSession(sessionId)
     if (!session) throw new Error('Session not found')
 
     // 检查是否是第一条消息
-    const isFirst = (this.getMessages(sessionId)).length === 0
+    const isFirst = (await this.getMessages(sessionId)).length === 0
     if (isFirst) {
       // 第一条消息：使用前20字符作为标题
-      this.updateSessionTitle(sessionId, userMessage)
+      await this.updateSessionTitle(sessionId, userMessage)
     }
 
     // 保存用户消息
     await this.saveMessage(sessionId, 'user', userMessage)
 
     // 获取历史消息，构建消息数组
-    const history = this.getMessages(sessionId)
+    const history = await this.getMessages(sessionId)
     const messages = history.map(m => ({ role: m.role, content: m.content }))
 
     // 调用 DeepSeek API
