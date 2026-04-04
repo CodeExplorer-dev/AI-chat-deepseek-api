@@ -7,6 +7,8 @@ const pool = require('../db')
 // 引入封装的 axios 请求工具
 const request = require('../request')
 
+const { createSSEStream, transformSSEStream } = require('../request-sse')
+
 // 引入 DeepSeek 配置
 const { MODEL, TEMPERATURE, MAX_TOKENS } = require('../config')
 
@@ -147,6 +149,34 @@ class ChatService {
     // 获取更新后的会话信息（包含新标题）
     const updatedSession = await this.getSession(sessionId)
     return { reply, sessionId, title: updatedSession.title }
+  }
+
+  /**
+   * SSE 流式对话
+   * @param {string} sessionId - 会话 ID
+   * @param {string} userMessage - 用户消息
+   * @returns {Object} { stream, saveMessage, session }
+   */
+  async chatStream(sessionId, userMessage) {
+    const session = await this.getSession(sessionId)
+
+    if (!session) throw new Error('Session not found')
+
+    const isFirst = (await this.getSession(sessionId)).length === 0
+    if (isFirst) {
+      await this.updateSessionTitle(sessionId, userMessage)
+    }
+
+    await this.saveMessage(sessionId, 'user', userMessage)
+
+    const history = await this.getMessages(sessionId)
+
+    const messages = history.map(m => ({ role: m.role, content: m.content }))
+
+    const rawStream = await createSSEStream(messages)
+    const stream = transformSSEStream(rawStream)
+
+    return { stream, sessionId}
   }
 }
 
