@@ -113,5 +113,45 @@ router.post('/sessions/:id/chat', async (req, res) => {
   }
 })
 
+/**
+ * POST /api/sessions/:id/chat/stream
+ * SSE 流式对话
+ * Body: { "content": "用户消息" }
+ */
+
+router.post('/sessions/:id/chat/stream', async (req, res) => {
+  try {
+    const { content } = req.body
+    if (!content) {
+      return res.status(400).json({error: 'Content is required'})
+    }
+
+    const sessionId = req.params.id
+    const { stream } = await chatService.chatStream(sessionId, content)
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
+
+    const read = stream.getReader()
+    const encoder = new TextEncoder()
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        res.write(value)
+        res.flush()
+      }
+      res.end()
+    } catch (error) {
+      res.end()
+    }
+  } catch (error) {
+     res.status(500).json({ error: error.message })
+  }
+})
+
 // 导出路由
 module.exports = router
