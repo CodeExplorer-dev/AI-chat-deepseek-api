@@ -1,13 +1,12 @@
 // 引入 UUID 生成工具，用于创建唯一会话 ID
 const { v4: uuidv4 } = require('uuid')
+const { API_KEY } = require('../config')
 
 // 引入数据库连接池
 const pool = require('../db')
 
 // 引入封装的 axios 请求工具
 const request = require('../request')
-
-const { createSSEStream, transformSSEStream } = require('../request-sse')
 
 // 引入 DeepSeek 配置
 const { MODEL, TEMPERATURE, MAX_TOKENS } = require('../config')
@@ -159,10 +158,11 @@ class ChatService {
    */
   async chatStream(sessionId, userMessage) {
     const session = await this.getSession(sessionId)
+    if (!session) {
+      throw new Error('Session not found')
+    }
 
-    if (!session) throw new Error('Session not found')
-
-    const isFirst = (await this.getSession(sessionId)).length === 0
+    const isFirst = (await this.getMessages(sessionId)).length === 0
     if (isFirst) {
       await this.updateSessionTitle(sessionId, userMessage)
     }
@@ -170,13 +170,27 @@ class ChatService {
     await this.saveMessage(sessionId, 'user', userMessage)
 
     const history = await this.getMessages(sessionId)
-
     const messages = history.map(m => ({ role: m.role, content: m.content }))
 
-    const rawStream = await createSSEStream(messages)
-    const stream = transformSSEStream(rawStream)
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${API_KEY}`
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        stream: true,
+        temperature: TEMPERATURE,
+        max_tokens: MAX_TOKENS
+      })
+    })
 
-    return { stream, sessionId}
+    return {
+      stream: response.body,
+      sessionId
+    }
   }
 }
 

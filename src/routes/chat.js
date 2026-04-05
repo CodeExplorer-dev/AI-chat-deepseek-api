@@ -1,5 +1,7 @@
 // 引入 Express 路由
 const express = require('express')
+const pool = require('../db')
+const { API_KEY, MODEL, TEMPERATURE, MAX_TOKENS } = require('../config')
 
 // 引入对话服务
 const { ChatService } = require('../services/chat-service')
@@ -118,38 +120,56 @@ router.post('/sessions/:id/chat', async (req, res) => {
  * SSE 流式对话
  * Body: { "content": "用户消息" }
  */
-
 router.post('/sessions/:id/chat/stream', async (req, res) => {
   try {
     const { content } = req.body
     if (!content) {
-      return res.status(400).json({error: 'Content is required'})
+      return res.status(400).json({ error: 'Content is required' })
     }
-
-    const sessionId = req.params.id
-    const { stream } = await chatService.chatStream(sessionId, content)
-
+    const { stream, sessionId } = await chatService.chatStream(req.params.id, content)
+    
+    // 设置 SSE 响应头
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
     res.setHeader('Connection', 'keep-alive')
     res.flushHeaders()
 
-    const read = stream.getReader()
-    const encoder = new TextEncoder()
+    const reader = stream.getReader()
+    const decoder = new TextDecoder()
+    let fullReply = ''
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        res.write(value)
-        res.flush()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      const lines = chunk.split('\n')
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6)
+          if (data === '[DONE]') {
+            res.write('data: [DONE]\n\n')
+            continue
+          }
+          try {
+            const parsed = JSON.parse(data)
+            const content = parsed.choices?.[0]?.delta?.content
+            if (content) {
+              fullReply += content
+              res.write(`data: ${JSON.stringify({ content })}\n\n`)
+            }
+          } catch (e) {}
+        }
       }
-      res.end()
-    } catch (error) {
-      res.end()
     }
+    // 保存助手回复到数据库
+    if (fullReply) {
+      await chatService.saveMessage(sessionId, 'assistant', fullReply)
+    }
+    res.end()
   } catch (error) {
-     res.status(500).json({ error: error.message })
+    res.status(500).json({ error: error.message })
   }
 })
 
